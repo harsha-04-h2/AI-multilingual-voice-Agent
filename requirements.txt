@@ -1,0 +1,11 @@
+livekit-agents[silero,turn-detector]
+livekit-plugins-ai-coustics
+livekit-plugins-deepgram
+livekit-plugins-cartesia
+livekit-plugins-openai
+livekit-plugins-noise-cancellation
+python-dotenv
+
+
+
+
