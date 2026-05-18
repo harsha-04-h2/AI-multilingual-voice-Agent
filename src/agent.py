@@ -82,7 +82,7 @@ SIP_DOMAIN              = os.getenv("SIP_DOMAIN", "")
 
 DEFAULT_TRANSFER_NUMBER = os.getenv("DEFAULT_TRANSFER_NUMBER", "")
 
-WEBHOOK_URL             = "https://events-12managment.app.n8n.cloud/webhook-test/voice"
+WEBHOOK_URL             = os.getenv("WEBHOOK_URL", "https://events-12managment.app.n8n.cloud/webhook-test/voice")
 
 
 
