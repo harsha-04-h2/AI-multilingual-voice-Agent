@@ -82,7 +82,7 @@ SIP_DOMAIN              = os.getenv("SIP_DOMAIN", "")
 
 DEFAULT_TRANSFER_NUMBER = os.getenv("DEFAULT_TRANSFER_NUMBER", "")
 
-WEBHOOK_URL             = os.getenv("WEBHOOK_URL", "https://events-12managment.app.n8n.cloud/webhook-test/voice")
+WEBHOOK_URL             = os.getenv("WEBHOOK_URL", "https://events-12managment.app.n8n.cloud/webhook/voice")
 
 
 
@@ -216,6 +216,18 @@ Email Collection Examples:
 
 - "What email can we reach you on sir?"
 
+- "Please spell your email slowly sir."
+
+- "You can say it like: harsha two four two four at gmail dot com"
+
+- "Let me confirm your email once properly sir."
+
+Email Confirmation Rule:
+
+- After the caller shares an email, repeat it back naturally and ask for confirmation.
+
+- Do not treat the email as finalized until the caller confirms it is correct.
+
 
 
 Venue Visit Promotion:
@@ -282,56 +294,116 @@ INITIAL_GREETING = "Hi, welcome to The Beginning. I'm Riya. What celebration are
 
 def fresh_lead():
 
-    return {"name": "", "email": "", "transcript": []}
+    return {"name": "", "email": "", "pending_email": "", "email_confirmed": False, "transcript": []}
 
 
 
 def extract_email(text: str):
 
-    text = text.lower().strip()
+    original_text = text
+    text = f" {text.lower().strip()} "
 
-    # Convert spoken words into symbols
-
-    replacements = {
-
-        " at ": "@",
-
-        " dot ": ".",
-
-        " underscore ": "_",
-
-        " dash ": "-",
-
-        " hyphen ": "-",
-
-        " space ": "",
-
+    number_words = {
+        "zero": "0",
+        "one": "1",
+        "two": "2",
+        "three": "3",
+        "four": "4",
+        "five": "5",
+        "six": "6",
+        "seven": "7",
+        "eight": "8",
+        "nine": "9",
     }
 
-    for word, symbol in replacements.items():
+    for word, digit in number_words.items():
+        text = re.sub(rf"\b{word}\b", digit, text)
 
-        text = text.replace(word, symbol)
+    text = re.sub(
+        r"\b(no it is|no it's|my email is|my gmail is|email is|gmail is|it is|it's|that is)\b",
+        " ",
+        text,
+    )
 
-    # Remove spaces
+    replacements = {
+        " at the rate ": " @ ",
+        " at ": " @ ",
+        " dot ": " . ",
+        " period ": " . ",
+        " underscore symbol ": " _ ",
+        " underscore ": " _ ",
+        " dash ": " - ",
+        " hyphen ": " - ",
+        " g mail ": "gmail",
+        " gee mail ": "gmail",
+        " gmail ": "gmail",
+        " yahoo mail ": "yahoo",
+        " hot mail ": "hotmail",
+        " outlook mail ": "outlook",
+        " space ": "",
+    }
 
-    text = text.replace(" ", "")
+    for phrase, replacement in replacements.items():
+        text = text.replace(phrase, replacement)
 
-    # Extract email
+    text = text.strip().replace(" ", "")
+    text = text.replace("gmailcom", "gmail.com")
+    text = text.replace("yahoocom", "yahoo.com")
+    text = text.replace("hotmailcom", "hotmail.com")
+    text = text.replace("outlookcom", "outlook.com")
+
+    logger.info(f"Processed email text: {text}")
 
     match = re.search(
-
-        r'[\w\.-]+@[\w\.-]+\.\w+',
-
-        text
-
+        r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+        text,
     )
 
     if match:
+        email = match.group(0)
+        logger.info(f"Extracted email: {email}")
+        return email
 
-        return match.group(0)
-
+    logger.warning(f"Could not extract email from: {original_text}")
     return None
 
+
+
+
+
+
+def is_email_confirmation(text: str):
+    text_lower = text.lower()
+    def has_phrase(phrase: str):
+        return re.search(rf"\b{re.escape(phrase)}\b", text_lower) is not None
+
+    rejection_phrases = [
+        "no",
+        "wrong",
+        "incorrect",
+        "not correct",
+        "change",
+    ]
+    confirmation_phrases = [
+        "yes",
+        "yeah",
+        "correct",
+        "that's correct",
+        "that is correct",
+        "right",
+        "perfect",
+        "ok",
+        "okay",
+        "confirmed",
+    ]
+
+    if any(has_phrase(phrase) for phrase in rejection_phrases):
+        return False
+
+    if any(has_phrase(phrase) for phrase in confirmation_phrases):
+        return True
+
+    return None
 
 
 def extract_name(text: str):
@@ -530,13 +602,13 @@ class TransferFunctions(llm.ToolContext):
 
 class Assistant(Agent):
 
-    def __init__(self, tools: list) -> None:
+    def __init__(self, tools: list | None = None) -> None:
 
         super().__init__(
 
             instructions=INSTRUCTIONS,
 
-            tools=tools,
+            tools=tools or [],
 
         )
 
@@ -708,17 +780,45 @@ async def entrypoint(ctx: JobContext):
 
 
 
-        # Extract email if not yet captured
+        # Extract and confirm email before finalizing the lead
 
-        if not lead["email"]:
+        if not lead["email_confirmed"]:
 
-            email = extract_email(text)
+            email_confirmation = None
+            if lead["pending_email"]:
+                email_confirmation = is_email_confirmation(text)
 
-            if email:
+            if email_confirmation is True:
 
-                lead["email"] = email
+                lead["email"] = lead["pending_email"]
 
-                logger.info(f"Captured email: {email}")
+                lead["email_confirmed"] = True
+
+                logger.info(f"Confirmed email: {lead['email']}")
+
+            elif email_confirmation is False:
+
+                logger.info(f"Email rejected by caller: {lead['pending_email']}")
+
+                lead["pending_email"] = ""
+
+                corrected_email = extract_email(text)
+
+                if corrected_email:
+
+                    lead["pending_email"] = corrected_email
+
+                    logger.info(f"Captured corrected pending email: {corrected_email}")
+
+            else:
+
+                email = extract_email(text)
+
+                if email:
+
+                    lead["pending_email"] = email
+
+                    logger.info(f"Captured pending email for confirmation: {email}")
 
 
 
