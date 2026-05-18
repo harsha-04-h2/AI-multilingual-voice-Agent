@@ -1,134 +1,403 @@
 import logging
 import textwrap
+import asyncio
+import requests
+import re
+import os
+import json
+
 from dotenv import load_dotenv
 
+from livekit import api
 from livekit.agents import (
     Agent,
-    AgentServer,
     AgentSession,
     JobContext,
     JobProcess,
     WorkerOptions,
+    RoomInputOptions,
     cli,
-    inference,
-    room_io,
+    llm,
 )
-
 from livekit.plugins import (
-    ai_coustics,
     silero,
+    deepgram,
+    cartesia,
+    google,
+    noise_cancellation,
 )
 
 logger = logging.getLogger("agent")
 logging.basicConfig(level=logging.INFO)
 
-# Load environment variables
 load_dotenv(".env")
 
-# Load knowledge base
-with open("knowledgebase.md", "r", encoding="utf-8") as f:
-    KNOWLEDGE_BASE = f.read()
+# ─────────────────────────────────────────────
+# Config — edit these to change behaviour
+# ─────────────────────────────────────────────
+CARTESIA_VOICE_ID       = "95d51f79-c397-46f9-b49a-23763d3eaa2d"  # Your custom Riya voice
+CARTESIA_MODEL          = "sonic-2"                                 # sonic-2 = fastest; sonic-3 = best quality
+SIP_TRUNK_ID            = os.getenv("SIP_TRUNK_ID", "")
+SIP_DOMAIN              = os.getenv("SIP_DOMAIN", "")
+DEFAULT_TRANSFER_NUMBER = os.getenv("DEFAULT_TRANSFER_NUMBER", "")
+WEBHOOK_URL             = os.getenv("WEBHOOK_URL", "https://events-12managment.app.n8n.cloud/webhook/voice")
 
+# ─────────────────────────────────────────────
+# Knowledge Base
+# ─────────────────────────────────────────────
+try:
+    with open("knowledgebase.md", "r", encoding="utf-8") as f:
+        KNOWLEDGE_BASE = f.read()
+except FileNotFoundError:
+    KNOWLEDGE_BASE = ""
+    logger.warning("knowledgebase.md not found.")
 
-class Assistant(Agent):
-    def __init__(self) -> None:
-        super().__init__(
-            llm=inference.LLM(
-                model="openai/gpt-4o-mini"
-            ),
-            instructions=textwrap.dedent(
-                f"""
-You are a helpful AI voice receptionist for ClickWave AI.
+# ─────────────────────────────────────────────
+# System Prompt
+# ─────────────────────────────────────────────
+INSTRUCTIONS = textwrap.dedent(f"""
+You are Riya, a warm premium receptionist at The Beginning, a luxury event venue in Bangalore.
+You are speaking to customers on a live phone call.
 
-Use the following business knowledge while answering users:
-
+Business Knowledge:
 {KNOWLEDGE_BASE}
 
-Rules:
-- Always reply in the SAME language the user speaks.
-- If the user speaks Telugu, reply in Telugu.
-- If the user speaks Kannada, reply in Kannada.
-- If the user speaks Hindi, reply in Hindi.
-- If the user speaks English, reply in English.
-- If the user speaks Hinglish, reply naturally in Hinglish.
+Personality:
+You are warm, elegant, calm, welcoming, and conversational.
+You sound like a real Bangalore hospitality receptionist.
+Never robotic. Never scripted. Never overly formal.
 
-Behavior:
-- Keep responses short and conversational.
-- Speak naturally like a human receptionist.
-- Be friendly, confident, and helpful.
-- Do not use markdown or bullet points in responses.
+Speaking Style:
+- Speak naturally in Bangalore Indian English.
+- Never sound British or American.
+- Keep responses short and smooth.
+- Sound human and premium.
+- Keep conversations flowing naturally.
 
-Voice Style:
-- Sound natural and warm.
-- Avoid robotic responses.
-- Keep replies concise for voice conversations.
-"""
-            ),
+Use phrases naturally:
+- "Sure sir"
+- "Absolutely ma'am"
+- "No worries"
+- "Definitely sir"
+- "That sounds lovely"
+- "We'd be happy to help"
+
+Conversation Rules:
+- Keep responses under 15 words.
+- Ask only ONE question at a time.
+- Never overload the caller with information.
+- Speak naturally like a real phone conversation.
+- If caller hesitates, reassure them warmly.
+
+Language Rules:
+- Always reply in the same language as the caller.
+- Support English, Hindi, Kannada, Telugu, and Hinglish naturally.
+
+Your Goals:
+1. Understand event requirements naturally.
+2. Collect customer name naturally.
+3. Collect customer email naturally.
+4. Encourage venue visits naturally.
+5. Make the venue sound luxurious and premium.
+
+Name Collection Examples:
+- "May I know your good name please?"
+- "Who am I speaking with today?"
+
+Email Collection Examples:
+- "Could I get your email to share venue details?"
+- "What email can we reach you on sir?"
+
+Venue Visit Promotion:
+- "The venue looks even more beautiful in person."
+- "Most families prefer visiting before finalizing."
+- "We can arrange a complimentary venue visit for you."
+- "Our team would personally walk you around."
+
+Pricing Rule:
+Never provide exact pricing.
+If customer asks pricing: "Pricing depends on guest count and setup preferences sir."
+Then encourage venue visit naturally.
+
+Grounding Rule:
+Only share information from the Business Knowledge above.
+If asked something you don't know, say "I'll have our team get back to you with those details sir."
+
+Safety Rule:
+Politely decline any inappropriate, illegal, or harmful requests.
+
+Critical Rules:
+- Never say you are AI.
+- Never confirm bookings.
+- Never invent information.
+- Never speak long paragraphs.
+- Never sound robotic.
+""")
+
+INITIAL_GREETING = "Hi, welcome to The Beginning. I'm Riya. What celebration are you planning today?"
+
+# ─────────────────────────────────────────────
+# Lead Storage
+# ─────────────────────────────────────────────
+def fresh_lead():
+    return {"name": "", "email": "", "sent": False}
+
+def extract_email(text: str):
+    match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', text)
+    return match.group(0) if match else None
+
+def extract_name(text: str):
+    text_lower = text.lower()
+    ignore_phrases = ["planning", "marriage", "wedding", "birthday", "event", "reception", "engagement"]
+    patterns = [
+        r"my name is ([a-zA-Z\s]+)",
+        r"i am ([a-zA-Z\s]+)",
+        r"this is ([a-zA-Z\s]+)",
+        r"i'm ([a-zA-Z\s]+)",
+        r"call me ([a-zA-Z\s]+)",
+        r"myself ([a-zA-Z\s]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text_lower)
+        if match:
+            name = match.group(1).strip()
+            # FIX: check each individual word in extracted name against ignore list
+            if any(word == name_word for word in ignore_phrases for name_word in name.split()):
+                return None
+            if len(name.split()) > 3:
+                return None
+            return name.title()
+    return None
+
+def send_webhook(lead: dict):
+    try:
+        response = requests.post(
+            WEBHOOK_URL,
+            json={"name": lead["name"], "email": lead["email"]},
+            timeout=5,
+        )
+        logger.info(f"Webhook sent: {response.status_code}")
+        return True
+    except Exception as e:
+        logger.error(f"Webhook failed: {e}")
+        return False
+
+# ─────────────────────────────────────────────
+# Call Transfer Tool
+# ─────────────────────────────────────────────
+class TransferFunctions(llm.ToolContext):
+    def __init__(self, ctx: JobContext, phone_number: str = None):
+        super().__init__(tools=[])
+        self.ctx = ctx
+        self.phone_number = phone_number
+
+    @llm.function_tool(description="Transfer the call to a human agent or another number.")
+    async def transfer_call(self, destination: str = None):
+        if not destination:
+            destination = DEFAULT_TRANSFER_NUMBER
+            if not destination:
+                return "Error: No default transfer number configured."
+
+        if "@" not in destination:
+            if SIP_DOMAIN:
+                clean = destination.replace("tel:", "").replace("sip:", "")
+                destination = f"sip:{clean}@{SIP_DOMAIN}"
+            else:
+                if not destination.startswith(("tel:", "sip:")):
+                    destination = f"tel:{destination}"
+        elif not destination.startswith("sip:"):
+            destination = f"sip:{destination}"
+
+        participant_identity = None
+        if self.phone_number:
+            participant_identity = f"sip_{self.phone_number}"
+        else:
+            for p in self.ctx.room.remote_participants.values():
+                participant_identity = p.identity
+                break
+
+        if not participant_identity:
+            return "Failed to transfer: could not identify the caller."
+
+        try:
+            await self.ctx.api.sip.transfer_sip_participant(
+                api.TransferSIPParticipantRequest(
+                    room_name=self.ctx.room.name,
+                    participant_identity=participant_identity,
+                    transfer_to=destination,
+                    play_dialtone=False,
+                )
+            )
+            logger.info(f"Call transferred to {destination}")
+            return "Transfer initiated successfully."
+        except Exception as e:
+            logger.error(f"Transfer failed: {e}")
+            return f"Error executing transfer: {e}"
+
+# ─────────────────────────────────────────────
+# Assistant
+# ─────────────────────────────────────────────
+class Assistant(Agent):
+    def __init__(self, tools: list) -> None:
+        super().__init__(
+            instructions=INSTRUCTIONS,
+            tools=tools,
         )
 
-
-server = AgentServer()
-
-
+# ─────────────────────────────────────────────
+# Prewarm — runs BEFORE calls come in
+# ─────────────────────────────────────────────
 def prewarm(proc: JobProcess):
-    logger.info("Loading Silero VAD...")
+    logger.info("Prewarming Silero VAD...")
     proc.userdata["vad"] = silero.VAD.load()
-    logger.info("Silero VAD loaded")
+    logger.info("Silero VAD ready")
 
+# ─────────────────────────────────────────────
+# Main Entrypoint
+# ─────────────────────────────────────────────
+async def entrypoint(ctx: JobContext):
+    logger.info(f"Connecting to room: {ctx.room.name}")
 
-server.setup_fnc = prewarm
+    # ── Parse metadata ──────────────────────────
+    phone_number = None
+    config_dict  = {}
 
+    try:
+        if ctx.job.metadata:
+            data = json.loads(ctx.job.metadata)
+            phone_number = data.get("phone_number")
+            config_dict  = data
+    except Exception:
+        pass
 
-@server.rtc_session(agent_name="my-agent")
-async def my_agent(ctx: JobContext):
+    try:
+        if ctx.room.metadata:
+            data = json.loads(ctx.room.metadata)
+            if data.get("phone_number"):
+                phone_number = data["phone_number"]
+            config_dict.update(data)
+    except Exception:
+        logger.warning("No valid JSON metadata in room.")
 
-    logger.info("NEW AGENT SESSION")
+    # ── Lead tracking ───────────────────────────
+    lead = fresh_lead()
 
-    await ctx.connect()
+    # ── Tools ───────────────────────────────────
+    fnc_ctx = TransferFunctions(ctx, phone_number)
 
-    stt = inference.STT(
-        model="deepgram/nova-3",
-        language="multi"
-    )
-
-    tts = inference.TTS(
-        model="cartesia/sonic-3",
-        voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
-    )
+    # ── Pipeline ────────────────────────────────
+    #   STT  → Deepgram Nova-3 (en-IN for Indian accent handling)
+    #   LLM  → Gemini 2.5 Flash (fast + cheap)
+    #   TTS  → Cartesia Sonic-2 (your custom Riya voice, ~90ms latency)
+    #   VAD  → Silero (prewarmed — no cold-start delay)
 
     session = AgentSession(
-        stt=stt,
-        tts=tts,
-        vad=silero.VAD.load(),
-        preemptive_generation=True,
-    )
-
-    await session.start(
-        agent=Assistant(),
-        room=ctx.room,
-        room_options=room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(
-                noise_cancellation=ai_coustics.audio_enhancement(
-                    model=ai_coustics.EnhancerModel.QUAIL_VF_S
-                ),
-            ),
+        vad=ctx.proc.userdata["vad"],                   # prewarmed, no delay
+        stt=deepgram.STT(
+            model="nova-3",
+            language="en-IN",                           # handles Indian accents + Hinglish
+            smart_format=True,
+        ),
+        llm=google.LLM(
+            model="gemini-2.5-flash",
+            api_key=os.getenv("GEMINI_API_KEY"),
+            temperature=0.7,
+        ),
+        tts=cartesia.TTS(
+            model=CARTESIA_MODEL,
+            voice=CARTESIA_VOICE_ID,
+            language="en",
+            speed=0.95,                                 # slightly slower = more premium feel
         ),
     )
 
-    await session.say(
-        "Hello, I am connected and working.",
-        allow_interruptions=True,
+    # ── Capture speech for lead data ────────────
+    # FIX: webhook runs via asyncio.to_thread to avoid blocking the event loop
+    @session.on("user_input_transcribed")
+    def on_user_input(msg):
+        text = msg.transcript
+        logger.info(f"User said: {text}")
+
+        if not lead["name"]:
+            name = extract_name(text)
+            if name:
+                lead["name"] = name
+                logger.info(f"Captured name: {name}")
+
+        if not lead["email"]:
+            email = extract_email(text)
+            if email:
+                lead["email"] = email
+                logger.info(f"Captured email: {email}")
+
+        if lead["name"] and lead["email"] and not lead["sent"]:
+            lead["sent"] = True
+
+            async def _send():
+                success = await asyncio.to_thread(send_webhook, lead)
+                if not success:
+                    lead["sent"] = False
+
+            asyncio.create_task(_send())
+
+    # FIX: connect to room BEFORE starting the session
+    await ctx.connect()
+
+    # ── Start session ────────────────────────────
+    await session.start(
+        room=ctx.room,
+        agent=Assistant(tools=list(fnc_ctx.function_tools.values())),
+        room_input_options=RoomInputOptions(
+            noise_cancellation=noise_cancellation.BVCTelephony(),
+        ),
     )
 
-    logger.info("Agent is active")
+    # ── Outbound dialing logic ───────────────────
+    should_dial = False
+    if phone_number:
+        user_already_here = any(
+            f"sip_{phone_number}" in p.identity or "sip_" in p.identity
+            for p in ctx.room.remote_participants.values()
+        )
+        if not user_already_here:
+            should_dial = True
+            logger.info("User not in room — initiating dial-out.")
+        else:
+            logger.info("User already in room — skipping dial.")
 
+    if should_dial:
+        try:
+            logger.info(f"Dialing {phone_number}...")
+            await ctx.api.sip.create_sip_participant(
+                api.CreateSIPParticipantRequest(
+                    room_name=ctx.room.name,
+                    sip_trunk_id=SIP_TRUNK_ID,
+                    sip_call_to=phone_number,
+                    participant_identity=f"sip_{phone_number}",
+                    wait_until_answered=True,
+                )
+            )
+            logger.info("Call answered — greeting caller.")
+            await session.say(INITIAL_GREETING, allow_interruptions=True)
 
-worker_options = WorkerOptions(
-    entrypoint_fnc=my_agent,
-    agent_name="my-agent",
-)
+        except Exception as e:
+            logger.error(f"Outbound call failed: {e}")
+            await ctx.shutdown()  # FIX: added missing await
+    else:
+        # Inbound or dashboard-dispatched call — greet immediately
+        await session.say(INITIAL_GREETING, allow_interruptions=True)
 
+    logger.info("Riya is live and listening.")
 
+# ─────────────────────────────────────────────
+# Run
+# ─────────────────────────────────────────────
 if __name__ == "__main__":
-    cli.run_app(worker_options)
-
+    cli.run_app(
+        WorkerOptions(
+            entrypoint_fnc=entrypoint,
+            prewarm_fnc=prewarm,
+            agent_name="my-agent",
+            num_idle_processes=1,
+        )
+    )
