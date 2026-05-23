@@ -40,7 +40,7 @@ CARTESIA_MODEL          = "sonic-2"                                 # sonic-2 = 
 SIP_TRUNK_ID            = "b72420b9-3c6d-4300-bdb8-80c021d63f08"
 SIP_DOMAIN              = os.getenv("SIP_DOMAIN", "")
 DEFAULT_TRANSFER_NUMBER = os.getenv("DEFAULT_TRANSFER_NUMBER", "")
-WEBHOOK_URL             = "https://n8n-i5hg.srv1696036.hstgr.cloud/webhook-test/voiceai"
+WEBHOOK_URL             = "https://n8n-i5hg.srv1696036.hstgr.cloud/webhook/voiceai"
 
 # ─────────────────────────────────────────────
 # Knowledge Base
