@@ -145,10 +145,62 @@ INITIAL_GREETING = "Hi, welcome to The Beginning. I'm Riya. May I know your good
 def fresh_lead():
     return {"name": "", "phone": "", "sent": False}
 
+def text_to_digits(text: str) -> str:
+    # Lowercase and clean punctuation
+    cleaned_text = re.sub(r'[^\w\s]', ' ', text.lower())
+    words = cleaned_text.split()
+    
+    word_map = {
+        "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+        "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+        "oh": "0", "o": "0",
+        "ek": "1", "do": "2", "teen": "3", "chaar": "4", "char": "4",
+        "paanch": "5", "panch": "5", "chhe": "6", "che": "6", "saat": "7",
+        "aath": "8", "ath": "8", "nau": "9", "shunya": "0", "shoonya": "0"
+    }
+    
+    digits = []
+    i = 0
+    while i < len(words):
+        word = words[i]
+        
+        if word == "double":
+            if i + 1 < len(words):
+                next_word = words[i+1]
+                next_digit = word_map.get(next_word, next_word)
+                if next_digit.isdigit() and len(next_digit) == 1:
+                    digits.append(next_digit * 2)
+                    i += 2
+                    continue
+            digits.append("double")
+            i += 1
+        elif word == "triple":
+            if i + 1 < len(words):
+                next_word = words[i+1]
+                next_digit = word_map.get(next_word, next_word)
+                if next_digit.isdigit() and len(next_digit) == 1:
+                    digits.append(next_digit * 3)
+                    i += 2
+                    continue
+            digits.append("triple")
+            i += 1
+        elif word in word_map:
+            digits.append(word_map[word])
+            i += 1
+        elif word.isdigit():
+            digits.append(word)
+            i += 1
+        else:
+            sub_digits = "".join(c for c in word if c.isdigit())
+            if sub_digits:
+                digits.append(sub_digits)
+            i += 1
+            
+    return "".join(digits)
+
 def extract_phone(text: str):
+    cleaned = text_to_digits(text)
     # Indian numbers only — 10 digits starting with 6-9
-    # Handles spoken formats: "nine eight four five...", digits, with/without spaces
-    cleaned = text.replace(" ", "").replace("-", "")
     match = re.search(r'(?:\+91|91)?([6-9]\d{9})', cleaned)
     if match:
         return "91" + match.group(1)  # always return with 91 prefix for Evolution API
