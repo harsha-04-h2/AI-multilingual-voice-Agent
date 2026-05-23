@@ -333,10 +333,27 @@ async def entrypoint(ctx: JobContext):
                 logger.info(f"Captured name: {name}")
 
         if not lead["phone"]:
-            phone = extract_phone(text)
-            if phone:
-                lead["phone"] = phone
-                logger.info(f"Captured phone: {phone}")
+            text_lower = text.lower()
+            same_number_patterns = [
+                r"same number",
+                r"this number",
+                r"number i'm calling from",
+                r"number i am calling from",
+                r"current number",
+                r"on this number",
+                r"use this one"
+            ]
+            if any(re.search(pat, text_lower) for pat in same_number_patterns) and phone_number:
+                cleaned_caller = phone_number.replace(" ", "").replace("-", "").replace("+", "")
+                match = re.search(r'([6-9]\d{9})$', cleaned_caller)
+                if match:
+                    lead["phone"] = "91" + match.group(1)
+                    logger.info(f"Captured phone (from caller ID): {lead['phone']}")
+            else:
+                phone = extract_phone(text)
+                if phone:
+                    lead["phone"] = phone
+                    logger.info(f"Captured phone: {phone}")
 
         if lead["name"] and lead["phone"] and not lead["sent"]:
             lead["sent"] = True
@@ -405,7 +422,7 @@ if __name__ == "__main__":
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
-            agent_name="my-agent",
+            agent_name="outbound-caller",
             num_idle_processes=1,
         )
     )
