@@ -422,7 +422,7 @@ if __name__ == "__main__":
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
-            agent_name="outbound-caller",
+            agent_name="my-agent",
             num_idle_processes=1,
         )
     )
