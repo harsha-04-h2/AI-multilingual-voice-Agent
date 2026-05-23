@@ -365,6 +365,16 @@ async def entrypoint(ctx: JobContext):
 
             asyncio.create_task(_send())
 
+    # ── Send webhook when caller disconnects if not already sent ──
+    @ctx.room.on("participant_disconnected")
+    def on_participant_disconnected(participant):
+        logger.info("Caller disconnected — sending final webhook.")
+        if (lead["name"] or lead["phone"]) and not lead["sent"]:
+            lead["sent"] = True
+            async def _send():
+                await asyncio.to_thread(send_webhook, lead)
+            asyncio.create_task(_send())
+
     # FIX: connect to room BEFORE starting the session
     await ctx.connect()
 
