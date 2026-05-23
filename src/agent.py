@@ -135,6 +135,12 @@ Critical Rules:
 - Never invent information.
 - Never speak long paragraphs.
 - Never sound robotic.
+
+Call Ending Rule:
+- Once you have collected the caller's name AND phone number, wrap up warmly.
+- Say a short goodbye like "Thank you sir, our team will reach out to you shortly. Have a lovely day!"
+- Then immediately call the end_call function to hang up the call.
+- Do NOT keep the conversation going after collecting both details.
 """)
 
 INITIAL_GREETING = "Hi, welcome to The Beginning. I'm Riya. May I know your good name please?"
@@ -293,6 +299,33 @@ class TransferFunctions(llm.ToolContext):
         except Exception as e:
             logger.error(f"Transfer failed: {e}")
             return f"Error executing transfer: {e}"
+
+    @llm.function_tool(description="End the call and hang up after the conversation is complete.")
+    async def end_call(self):
+        logger.info("Agent ending the call.")
+        try:
+            participant_identity = None
+            if self.phone_number:
+                participant_identity = f"sip_{self.phone_number}"
+            else:
+                for p in self.ctx.room.remote_participants.values():
+                    participant_identity = p.identity
+                    break
+
+            if participant_identity:
+                await self.ctx.api.sip.transfer_sip_participant(
+                    api.TransferSIPParticipantRequest(
+                        room_name=self.ctx.room.name,
+                        participant_identity=participant_identity,
+                        transfer_to="tel:+0",  # invalid destination forces a clean hangup
+                        play_dialtone=False,
+                    )
+                )
+        except Exception:
+            pass  # hang up attempt done — disconnect room either way
+        finally:
+            await self.ctx.shutdown()
+        return "Call ended."
 
 # ─────────────────────────────────────────────
 # Assistant
