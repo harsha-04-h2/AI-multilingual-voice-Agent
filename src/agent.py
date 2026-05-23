@@ -40,7 +40,7 @@ CARTESIA_MODEL          = "sonic-2"                                 # sonic-2 = 
 SIP_TRUNK_ID            = os.getenv("SIP_TRUNK_ID", "")
 SIP_DOMAIN              = os.getenv("SIP_DOMAIN", "")
 DEFAULT_TRANSFER_NUMBER = os.getenv("DEFAULT_TRANSFER_NUMBER", "")
-WEBHOOK_URL             = os.getenv("WEBHOOK_URL", "https://n8n-i5hg.srv1696036.hstgr.cloud/webhook-test/events")
+WEBHOOK_URL             = os.getenv("WEBHOOK_URL", "https://n8n-i5hg.srv1696036.hstgr.cloud/webhook/events")
 
 # ─────────────────────────────────────────────
 # Knowledge Base
@@ -137,7 +137,7 @@ Critical Rules:
 - Never sound robotic.
 """)
 
-INITIAL_GREETING = "Hi, welcome to The Beginning. I'm Riya. What celebration are you planning today?"
+INITIAL_GREETING = "Hi, welcome to The Beginning. I'm Riya. May I know your good name please?"
 
 # ─────────────────────────────────────────────
 # Lead Storage

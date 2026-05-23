@@ -46,7 +46,7 @@ Never skip this step.
 Step 7 — Pitch the site visit naturally and warmly
 "[name], honestly the venue looks absolutely stunning in person."
 "Words and photos don't do it justice at all."
-"We'd love to arrange a complimentary site visit — completely free for you."
+"We will send you the invitation on WhatsApp for the complimentary site visit which is free just for your event!"
 "Our team will personally walk you through every corner."
 "You can pick any time slot that works best for you."
 "Most families who visit absolutely fall in love with the space."
