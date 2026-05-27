@@ -17,7 +17,7 @@ from livekit.agents import (
     cli,
     llm,
 )
-from livekit.agents.multimodal import MultimodalAgent
+from livekit.agents.voice import Agent as VoiceAgent
 from livekit.plugins import (
     silero,
     google,
@@ -374,15 +374,16 @@ async def entrypoint(ctx: JobContext):
     fnc_ctx = TransferFunctions(ctx, phone_number)
 
     # ── Pipeline ────────────────────────────────
-    session = MultimodalAgent(
-        model=google.beta.realtime.RealtimeModel(
+    session = VoiceAgent(
+        instructions=INSTRUCTIONS,
+        llm=google.beta.realtime.RealtimeModel(
             model="gemini-2.0-flash-exp",
             voice="Aoede",
             instructions=INSTRUCTIONS,
             api_key=os.getenv("GEMINI_API_KEY"),
         ),
         vad=ctx.proc.userdata["vad"],
-        fnc_ctx=fnc_ctx,
+        tools=[fnc_ctx],
     )
 
     # ── Capture speech for lead data ────────────
