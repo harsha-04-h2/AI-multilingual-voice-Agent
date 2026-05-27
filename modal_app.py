@@ -40,9 +40,11 @@ image = (
             "PYTHONUNBUFFERED": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
             "LIVEKIT_AGENTS_LOG_LEVEL": "INFO",
+            "PYTHONIOENCODING": "utf-8",
+            "LC_ALL": "C.UTF-8",
         }
     )
-    .run_commands("python src/agent.py download-files")
+    # .run_commands("python -m livekit.agents download-files")  # Disabled to avoid Unicode checkmark issue
 )
 
 app = modal.App(APP_NAME)

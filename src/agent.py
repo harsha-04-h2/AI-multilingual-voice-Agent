@@ -10,8 +10,6 @@ from dotenv import load_dotenv
 
 from livekit import api
 from livekit.agents import (
-    Agent,
-    AgentSession,
     JobContext,
     JobProcess,
     WorkerOptions,
@@ -19,10 +17,9 @@ from livekit.agents import (
     cli,
     llm,
 )
+from livekit.agents.multimodal import MultimodalAgent
 from livekit.plugins import (
     silero,
-    deepgram,
-    cartesia,
     google,
     noise_cancellation,
 )
@@ -35,8 +32,6 @@ load_dotenv(".env")
 # ─────────────────────────────────────────────
 # Config — edit these to change behaviour
 # ─────────────────────────────────────────────
-CARTESIA_VOICE_ID       = "95d51f79-c397-46f9-b49a-23763d3eaa2d"  # Your custom Riya voice
-CARTESIA_MODEL          = "sonic-2"                                 # sonic-2 = fastest; sonic-3 = best quality
 SIP_TRUNK_ID            = "b72420b9-3c6d-4300-bdb8-80c021d63f08"
 SIP_DOMAIN              = os.getenv("SIP_DOMAIN", "")
 DEFAULT_TRANSFER_NUMBER = os.getenv("DEFAULT_TRANSFER_NUMBER", "")
@@ -56,94 +51,84 @@ except FileNotFoundError:
 # System Prompt
 # ─────────────────────────────────────────────
 INSTRUCTIONS = textwrap.dedent(f"""
-You are Riya, a warm premium receptionist at The Beginning, a luxury event venue in Bangalore.
+You are Riya, a warm and premium receptionist at The Beginning, a luxury 
+boutique wedding resort in Bangalore.
 You are speaking to customers on a live phone call.
 
 Business Knowledge:
 {KNOWLEDGE_BASE}
 
-Personality:
-You are warm, elegant, calm, welcoming, and conversational.
-You sound like a real Bangalore hospitality receptionist.
-Never robotic. Never scripted. Never overly formal.
+PERSONALITY:
+You are warm, elegant, calm, and genuinely excited about this venue.
+You sound like a real Bangalore hospitality professional — not a robot.
+React differently every time. Surprise callers with warmth and spontaneity.
 
-Speaking Style:
-- Speak naturally in Bangalore Indian English.
-- Never sound British or American.
-- Keep responses short and smooth.
-- Sound human and premium.
-- Keep conversations flowing naturally.
+SPEAKING STYLE:
+- Natural Indian English — Bangalore flavour. Never British or American.
+- Use Indian expressions freely — "arey", "yaar", "na", "only", "itself"
+- Short responses — under 20 words per turn
+- One thought at a time. Never dump information.
+- Sound genuinely in love with this venue
 
-Use phrases naturally:
-- "Sure sir"
-- "Absolutely ma'am"
-- "No worries"
-- "Definitely sir"
-- "That sounds lovely"
-- "We'd be happy to help"
+CONVERSATION FLOW — FOLLOW THIS ORDER STRICTLY:
 
-Conversation Rules:
-- Keep responses under 15 words.
-- Ask only ONE question at a time.
-- Never overload the caller with information.
-- Speak naturally like a real phone conversation.
-- If caller hesitates, reassure them warmly.
+Step 1 — GREET
+Greet warmly and ask for their name immediately.
 
-Language Rules:
-- Always reply in the same language as the caller.
-- Support English, Hindi, Kannada, Telugu, and Hinglish naturally.
+Step 2 — COLLECT PHONE NUMBER
+As soon as you have their name, ask for their WhatsApp number.
+Frame it as wanting to send them details on WhatsApp.
+Only accept 10-digit Indian mobile numbers starting with 6, 7, 8, or 9.
 
-Your Goals:
-1. Understand event requirements naturally.
-2. Collect customer name naturally.
-3. Collect customer contact number naturally.
-4. Encourage venue visits naturally.
-5. Make the venue sound luxurious and premium.
+Step 3 — UNDERSTAND THEIR NEED
+Ask what they are planning — wedding, birthday, corporate, etc.
 
-Name Collection Examples:
-- "May I know your good name please?"
-- "Who am I speaking with today?"
+Step 4 — ANSWER THEIR QUESTIONS
+Answer all FAQs using ONLY the Business Knowledge section.
+Frame answers in your own warm natural words — never read out a list.
+Keep each answer to 1–2 sentences max.
 
-Phone Collection Examples:
-- "Could I get your contact number to share venue details?"
-- "What number can our team reach you on sir?"
+ANSWERING RULES:
+- Capacity: give numbers warmly with excitement
+- Spaces: describe briefly and make it sound magical
+- Catering/decoration: confirm yes, details during visit
+- Pricing: NEVER give any number — say pricing depends on guest count 
+  and setup, then push for visit
+- Rooms: 15 plush rooms, 7-star bridal suite, ~70 guests total
+- Parking: 300+ cars, completely free
+- Location: Near Sri Sri Ravishankar Vidya Mandir, Mullur, close to Wipro
 
-Validation rule: only accept 10-digit numbers starting with 6, 7, 8, or 9.
-Reject anything else silently.
+Step 5 — PUSH FOR SITE VISIT
+At a natural moment push for a complimentary on-site visit.
+"Honestly the venue looks even more stunning in person — photos don't 
+do it justice at all yaar"
+"Most families who come just fall in love immediately"
+"Completely free, zero commitment — just come have a look!"
 
-Venue Visit Promotion:
-- "The venue looks even more beautiful in person."
-- "Most families prefer visiting before finalizing."
-- "We can arrange a complimentary venue visit for you."
-- "Our team would personally walk you around."
+Step 6 — WARM CLOSE
+Once questions are answered:
+- Confirm WhatsApp follow-up
+- One final site visit push
+- Warm enthusiastic goodbye
+- Call end_call immediately after goodbye
 
-Pricing Rule:
-Never provide exact pricing.
-If customer asks pricing: "Pricing depends on guest count and setup preferences sir."
-Then encourage venue visit naturally.
+GUARDRAILS:
+- PRICING: Never give any number, range, or estimate. Ever.
+- WHATSAPP: Always mention WhatsApp as the follow-up channel only.
+- SITE VISIT: Every call must end with a site visit push.
+- KNOWLEDGE: Only answer from Business Knowledge. Never invent facts.
+- BOOKING: Never confirm any booking on the call.
+- IDENTITY: Never say you are AI. If asked: "I'm Riya from The Beginning!"
+- LANGUAGE: Always reply in the caller's language — English, Hindi, 
+  Kannada, Telugu, Hinglish all supported.
 
-Grounding Rule:
-Only share information from the Business Knowledge above.
-If asked something you don't know, say "I'll have our team get back to you with those details sir."
-
-Safety Rule:
-Politely decline any inappropriate, illegal, or harmful requests.
-
-Critical Rules:
-- Never say you are AI.
-- Never confirm bookings.
-- Never invent information.
-- Never speak long paragraphs.
-- Never sound robotic.
-
-Call Ending Rule:
-- Once you have collected the caller's name AND phone number, wrap up warmly.
-- Say a short goodbye like "Thank you sir, our team will reach out to you shortly. Have a lovely day!"
-- Then immediately call the end_call function to hang up the call.
-- Do NOT keep the conversation going after collecting both details.
+CALL ENDING RULE:
+Only end after: name collected + phone collected + questions answered + 
+WhatsApp mentioned + site visit pushed + warm goodbye delivered.
+Call end_call immediately after goodbye.
 """)
 
-INITIAL_GREETING = "Hi, welcome to The Beginning. I'm Riya. May I know your good name please?"
+INITIAL_GREETING = "Hi, welcome to The Beginning! I'm Riya. May I know your good name please?"
 
 # ─────────────────────────────────────────────
 # Lead Storage
@@ -204,42 +189,59 @@ def text_to_digits(text: str) -> str:
             
     return "".join(digits)
 
-def extract_phone(text: str):
-    cleaned = text_to_digits(text)
-    # Indian numbers only — 10 digits starting with 6-9
-    match = re.search(r'(?:\+91|91)?([6-9]\d{9})', cleaned)
-    if match:
-        return "91" + match.group(1)  # always return with 91 prefix for Evolution API
-    return None
+def format_whatsapp_number(phone: str) -> str:
+    if not phone:
+        return ""
+    # Strips any +, spaces, dashes, or brackets from the input
+    cleaned = re.sub(r'[\+\s\-\(\)\[\]]', '', phone)
+    
+    # If the number starts with +91 or 91, remove it cleanly
+    if cleaned.startswith("91") and len(cleaned) > 10:
+        cleaned = cleaned[2:]
+        
+    # If the number is just 10 digits, prepend 91
+    return "91" + cleaned
 
-def extract_name(text: str):
-    text_lower = text.lower()
-    ignore_phrases = ["planning", "marriage", "wedding", "birthday", "event", "reception", "engagement"]
-    patterns = [
-        r"my name is ([a-zA-Z\s]+)",
-        r"i am ([a-zA-Z\s]+)",
-        r"this is ([a-zA-Z\s]+)",
-        r"i'm ([a-zA-Z\s]+)",
-        r"call me ([a-zA-Z\s]+)",
-        r"myself ([a-zA-Z\s]+)",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text_lower)
-        if match:
-            name = match.group(1).strip()
-            # FIX: check each individual word in extracted name against ignore list
-            if any(word == name_word for word in ignore_phrases for name_word in name.split()):
-                return None
-            if len(name.split()) > 3:
-                return None
-            return name.title()
-    return None
+async def extract_lead_with_ai(transcript_history: list) -> dict:
+    """Uses Gemini to extract name and phone from full conversation history"""
+    try:
+        conversation_text = "\n".join(transcript_history[-20:])  # last 20 messages
+
+        import google.generativeai as genai
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        model = genai.GenerativeModel("gemini-1.5-flash")
+
+        prompt = f"""Extract the customer's name and phone number from this call transcript.
+
+Transcript:
+{conversation_text}
+
+Rules:
+- Only extract what the CUSTOMER said, not the agent
+- Phone must be a 10 digit Indian mobile number starting with 6, 7, 8, or 9
+- Name should be the customer's actual name only
+- If not found return empty string
+
+Respond ONLY in this exact JSON format with no other text:
+{{"name": "extracted name or empty string", "phone": "10 digit number or empty string"}}"""
+
+        response = model.generate_content(prompt)
+        text = response.text.strip().replace("```json", "").replace("```", "").strip()
+        data = json.loads(text)
+        return {
+            "name": data.get("name", "").strip().title(),
+            "phone": format_whatsapp_number(data.get("phone", "")) if data.get("phone") else ""
+        }
+    except Exception as e:
+        logger.error(f"AI extraction failed: {e}")
+        return {"name": "", "phone": ""}
 
 def send_webhook(lead: dict):
     try:
+        formatted_phone = format_whatsapp_number(lead["phone"])
         response = requests.post(
             WEBHOOK_URL,
-            json={"name": lead["name"], "phone": lead["phone"]},
+            json={"name": lead["name"], "phone": formatted_phone},
             timeout=5,
         )
         logger.info(f"Webhook sent: {response.status_code}")
@@ -324,18 +326,11 @@ class TransferFunctions(llm.ToolContext):
         except Exception:
             pass  # hang up attempt done — disconnect room either way
         finally:
-            await self.ctx.shutdown()
+            try:
+                self.ctx.shutdown()  # not a coroutine in livekit-agents 1.x
+            except Exception:
+                pass
         return "Call ended."
-
-# ─────────────────────────────────────────────
-# Assistant
-# ─────────────────────────────────────────────
-class Assistant(Agent):
-    def __init__(self, tools: list) -> None:
-        super().__init__(
-            instructions=INSTRUCTIONS,
-            tools=tools,
-        )
 
 # ─────────────────────────────────────────────
 # Prewarm — runs BEFORE calls come in
@@ -379,76 +374,75 @@ async def entrypoint(ctx: JobContext):
     fnc_ctx = TransferFunctions(ctx, phone_number)
 
     # ── Pipeline ────────────────────────────────
-    #   STT  → Deepgram Nova-3 (en-IN for Indian accent handling)
-    #   LLM  → Gemini 2.5 Flash (fast + cheap)
-    #   TTS  → Cartesia Sonic-2 (your custom Riya voice, ~90ms latency)
-    #   VAD  → Silero (prewarmed — no cold-start delay)
-
-    session = AgentSession(
-        vad=ctx.proc.userdata["vad"],                   # prewarmed, no delay
-        stt=deepgram.STT(
-            model="nova-2",
-            language="en-IN",                           # handles Indian accents + Hinglish
-            smart_format=True,
-        ),
-        llm=google.LLM(
-            model="gemini-2.5-flash",
+    session = MultimodalAgent(
+        model=google.beta.realtime.RealtimeModel(
+            model="gemini-2.0-flash-exp",
+            voice="Aoede",
+            instructions=INSTRUCTIONS,
             api_key=os.getenv("GEMINI_API_KEY"),
-            temperature=0.7,
         ),
-        tts=cartesia.TTS(
-            model=CARTESIA_MODEL,
-            voice=CARTESIA_VOICE_ID,
-            language="en",
-            speed=0.95,                                 # slightly slower = more premium feel
-        ),
+        vad=ctx.proc.userdata["vad"],
+        fnc_ctx=fnc_ctx,
     )
 
     # ── Capture speech for lead data ────────────
-    # FIX: webhook runs via asyncio.to_thread to avoid blocking the event loop
+    transcript_history = []
+
     @session.on("user_input_transcribed")
     def on_user_input(msg):
         text = msg.transcript
-        logger.info(f"User said: {text}")
 
-        if not lead["name"]:
-            name = extract_name(text)
-            if name:
-                lead["name"] = name
-                logger.info(f"Captured name: {name}")
+        # Only process final (completed) transcripts, not interim partials
+        if not getattr(msg, 'is_final', True):
+            return
 
-        if not lead["phone"]:
-            text_lower = text.lower()
-            same_number_patterns = [
-                r"same number",
-                r"this number",
-                r"number i'm calling from",
-                r"number i am calling from",
-                r"current number",
-                r"on this number",
-                r"use this one"
-            ]
-            if any(re.search(pat, text_lower) for pat in same_number_patterns) and phone_number:
-                cleaned_caller = phone_number.replace(" ", "").replace("-", "").replace("+", "")
-                match = re.search(r'([6-9]\d{9})$', cleaned_caller)
-                if match:
-                    lead["phone"] = "91" + match.group(1)
-                    logger.info(f"Captured phone (from caller ID): {lead['phone']}")
-            else:
-                phone = extract_phone(text)
-                if phone:
-                    lead["phone"] = phone
-                    logger.info(f"Captured phone: {phone}")
+        logger.info(f"User said (final): {text}")
 
-        if lead["name"] and lead["phone"] and not lead["sent"]:
-            lead["sent"] = True
+        # Build conversation history
+        transcript_history.append(f"Customer: {text}")
 
-            async def _send():
+        # Only run extraction if we still need name or phone
+        if lead["name"] and lead["phone"]:
+            return
+        if lead["sent"]:
+            return
+
+        async def _extract_and_send():
+            # extract_lead_with_ai is async — call directly with await, NOT asyncio.to_thread
+            result = await extract_lead_with_ai(list(transcript_history))
+
+            if result["name"] and not lead["name"]:
+                lead["name"] = result["name"]
+                logger.info(f"AI captured name: {{lead['name']}}")
+
+            if result["phone"] and not lead["phone"]:
+                lead["phone"] = result["phone"]
+                logger.info(f"AI captured phone: {{lead['phone']}}")
+
+            if lead["name"] and lead["phone"] and not lead["sent"]:
+                lead["sent"] = True
+                logger.info(f"Sending webhook — Name: {{lead['name']}} Phone: {{lead['phone']}}")
+
+                # send_webhook is sync/blocking — asyncio.to_thread is correct here
                 success = await asyncio.to_thread(send_webhook, lead)
                 if not success:
                     lead["sent"] = False
+                    return
 
-            asyncio.create_task(_send())
+                await asyncio.sleep(2)
+
+                await session.say(
+                    f"Arey {{lead['name']}}, it was such a pleasure talking to you yaar! "
+                    f"We will send you the site visit invite on WhatsApp right away. "
+                    f"Cannot wait to see you and your family at The Beginning — it is going to be absolutely stunning! "
+                    f"Have a beautiful day ahead — speak soon, bye bye!",
+                    allow_interruptions=False,
+                )
+
+                await asyncio.sleep(2)
+                await fnc_ctx.end_call()
+
+        asyncio.create_task(_extract_and_send())
 
     # ── Send webhook when caller disconnects if not already sent ──
     @ctx.room.on("participant_disconnected")
@@ -468,13 +462,7 @@ async def entrypoint(ctx: JobContext):
     await ctx.connect()
 
     # ── Start session ────────────────────────────
-    await session.start(
-        room=ctx.room,
-        agent=Assistant(tools=list(fnc_ctx.function_tools.values())),
-        room_input_options=RoomInputOptions(
-            noise_cancellation=noise_cancellation.BVCTelephony(),
-        ),
-    )
+    await session.start(ctx.room)
 
     # ── Outbound dialing logic ───────────────────
     should_dial = False
@@ -502,14 +490,20 @@ async def entrypoint(ctx: JobContext):
                 )
             )
             logger.info("Call answered — greeting caller.")
-            await session.say(INITIAL_GREETING, allow_interruptions=True)
+            try:
+                await session.say(INITIAL_GREETING, allow_interruptions=True)
+            except AttributeError:
+                pass # MultimodalAgent might not support say
 
         except Exception as e:
             logger.error(f"Outbound call failed: {e}")
             await ctx.shutdown()  # FIX: added missing await
     else:
         # Inbound or dashboard-dispatched call — greet immediately
-        await session.say(INITIAL_GREETING, allow_interruptions=True)
+        try:
+            await session.say(INITIAL_GREETING, allow_interruptions=True)
+        except AttributeError:
+            pass
 
     logger.info("Riya is live and listening.")
 
